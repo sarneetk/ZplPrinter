@@ -14,7 +14,7 @@ var defaults ={
     isOn: true,
     density: '8',
     width: '4',
-    height: '6',
+    height: '2',
     unit: '1',
     host: '127.0.0.1',
     port: '9100',
@@ -34,6 +34,9 @@ $(function() {
     // todo only on first run
     if (!global.localStorage.getItem('isOn')) {
         Object.entries(defaults).forEach(function([k,v]) {
+            // process.stdout.write("line 37")
+            // process.stdout.write(k + '\n')
+            // process.stdout.write(v.toString() + '\n')
             global.localStorage.setItem(k,v);
         });
     }
@@ -41,7 +44,10 @@ $(function() {
 });
 
 $(document).ready(function() {
+    process.stdout.write("ready event")
     Object.keys(defaults).forEach(function(k) {
+        // process.stdout.write("k: " + k)
+        // process.stdout.write("global storage : " + global.localStorage.getItem(k).toString() +'\n')
         configs[k] = global.localStorage.getItem(k);
     });
 
@@ -122,6 +128,10 @@ function notify (text, glyphicon, type, delay) {
     }).show();
 }
 
+var temp_buffer = '';
+const ZPL_START = '^XA';
+const ZPL_END = '^FS^XZ';
+
 // Start tcp server and listen on configuret host/port
 function startTcpServer () {
     if (server != undefined) {
@@ -148,7 +158,18 @@ function startTcpServer () {
         sock.on('data', function(data) {
             // chrome.sockets.tcp.onReceive.addListener(function (info) {
             notify('{0} bytes received from Client: <b>{1}</b> Port: <b>{2}</b>'.format(data.length, clientSocketInfo.peerAddress, clientSocketInfo.peerPort), 'print', 'info', 1000);
-            var zpls = String.fromCharCode.apply(null, data).split(/\^XZ/);
+
+            var zpls = data.toString();
+
+            if (zpls.startsWith(ZPL_START)) {
+                temp_buffer = temp_buffer + zpls
+                process.stdout.write('=========updated temp buffer=========\n');
+            }
+
+            if (zpls.endsWith(ZPL_END)) {
+                temp_buffer = temp_buffer + zpls
+                process.stdout.write('=========updated temp buffer again=========\n');
+            }
             if (!configs.keepTcpSocket) {
                 server.close();
             }
@@ -156,23 +177,23 @@ function startTcpServer () {
             var width = parseFloat(configs.width) / factor;
             var height = parseFloat(configs.height) / factor;
 
-            for (var i in zpls) {
-                var zpl = zpls[i];
-                if (!(!zpl || !zpl.length)) {
-                    zpl += '^XZ';
-                }
+            // process.stdout.write(width.toString())
+            // process.stdout.write(height.toString())
 
-                // if (configs['saveLabels']) {
-                //     if (configs['filetype'] == '2') {
-                //         savePdf(zpl, configs.density, width, height);
-                //     }
-                // }
+            process.stdout.write("check if we have the full string\n")
+            process.stdout.write(temp_buffer.startsWith(ZPL_START) && temp_buffer.endsWith(ZPL_END) + '\n')
 
+            if (temp_buffer.startsWith(ZPL_START) && temp_buffer.endsWith(ZPL_END)) {
                 var xhr = new XMLHttpRequest();
-                xhr.open('POST', 'http://api.labelary.com/v1/printers/{0}dpmm/labels/{1}x{2}/0/'.format(configs.density, width, height), true);
+                xhr.open('POST', 'http://api.labelary.com/v1/printers/8dpmm/labels/{1}x{2}/0/'.format(configs.density, width, height), true);
+
+                // xhr.open('POST', 'http://api.labelary.com/v1/printers/8dpmm/labels/2x4/0/', true);
                 xhr.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
                 xhr.responseType = 'blob';
+
                 xhr.onload = function(e) {
+                    process.stdout.write('status from api: ' + this.status + '\n')
+
                     if (this.status == 200) {
                         var blob = this.response;
                         // if (configs['saveLabels']) {
@@ -181,6 +202,8 @@ function startTcpServer () {
                         //     }
                         // }
                         var size = getSize(width, height);
+                        // process.stdout.write(size.width.toString() + '\n')
+                        // process.stdout.write(size.height.toString()  + '\n')
                         var img = document.createElement('img');
                         img.setAttribute('height', size.height);
                         img.setAttribute('width', size.width);
@@ -197,7 +220,9 @@ function startTcpServer () {
                         $('#label').animate({ 'top': '0px' }, 1500);
                     }
                 };
-                xhr.send(zpl);
+                process.stdout.write('send data')
+                xhr.send(temp_buffer);
+                temp_buffer = ''
             }
         });
         // chrome.sockets.tcp.getInfo(clientInfo.clientSocketId, function (socketInfo) {
@@ -284,7 +309,17 @@ function initEvents () {
         e.preventDefault();
     });
 
-    $('#configsForm').submit(function(e) {
+    $('#configsForm').on("submit", function(e) {
+        process.stdout.write("config form submitted")
+        e.preventDefault();
+        saveConfigs();
+
+    });
+
+
+
+    $('#btn-save').on("click", function(e) {
+        process.stdout.write("config form submitted")
         e.preventDefault();
         saveConfigs();
 
@@ -305,17 +340,17 @@ function initEvents () {
     });
 
     $('#btn-path').click(function() {
-        // chrome.fileSystem.chooseEntry({
-        //     type: 'openDirectory',
-        // }, function (entry) {
-        //     if (chrome.runtime.lastError) {
-        //         console.info(chrome.runtime.lastError.message);
-        //     } else {
-        //         initPath(entry);
-        //         pathEntry = entry;
-        //         retainEntry = chrome.fileSystem.retainEntry(entry);
-        //     }
-        // });
+        chrome.fileSystem.chooseEntry({
+            type: 'openDirectory',
+        }, function (entry) {
+            if (chrome.runtime.lastError) {
+                console.info(chrome.runtime.lastError.message);
+            } else {
+                initPath(entry);
+                pathEntry = entry;
+                retainEntry = chrome.fileSystem.retainEntry(entry);
+            }
+        });
     });
 
 }
@@ -353,6 +388,9 @@ function saveConfigs () {
     }
 
     Object.entries(configs).forEach(function([k,v]) {
+       // process.stdout.write("line 393")
+       // process.stdout.write(k + '\n')
+       // process.stdout.write(v + '\n')
         global.localStorage.setItem(k,v);
     });
 
@@ -362,6 +400,7 @@ function saveConfigs () {
 
 // Init/load configs from local storage
 function initConfigs () {
+    // process.stdout.write("init config")
     for (var key in configs) {
         if (key == 'density') {
             initDropDown('density', configs[key]);
@@ -387,6 +426,8 @@ function initConfigs () {
             //     initPath(entry);
             // });
         } else {
+            // process.stdout.write(key + '\n')
+            // process.stdout.write(configs[key] + '\n')
             $('#' + key).val(configs[key]);
         }
     }
